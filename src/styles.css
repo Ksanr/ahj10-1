@@ -207,3 +207,23 @@ body {
 }
 .recording-ok { color: #16a34a; }
 .recording-cancel { color: #dc2626; }
+
+/* Стили для превью видео */
+.video-preview-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 240px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  background: black;
+  z-index: 1000;
+}
+.video-preview-container video {
+  width: 100%;
+  display: block;
+}
+.video-preview-container.hidden {
+  display: none;
+}

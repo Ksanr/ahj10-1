@@ -6,11 +6,13 @@ const timelineContainer = document.querySelector('.timeline');
 const postInput = document.getElementById('postInput');
 const submitBtn = document.getElementById('submitBtn');
 const audioBtn = document.getElementById('audioBtn');
-const videoBtn = document.getElementById('videoBtn'); // для задачи 3 (пока не используется)
+const videoBtn = document.getElementById('videoBtn');
 const recordingPanel = document.getElementById('recordingPanel');
 const recordingTimerSpan = document.getElementById('recordingTimer');
 const recordingOk = document.getElementById('recordingOk');
 const recordingCancel = document.getElementById('recordingCancel');
+const videoPreviewContainer = document.getElementById('videoPreviewContainer');
+const videoPreview = document.getElementById('videoPreview');
 
 // Модальное окно (из задачи 1)
 const modal = document.getElementById('modal');
@@ -20,17 +22,17 @@ const modalSubmit = document.getElementById('modalSubmit');
 const coordError = document.getElementById('coordError');
 
 // ===== Хранилище постов =====
-const posts = []; // { id, type, text?, audioUrl?, latitude, longitude, timestamp }
+const posts = [];
 
-// ===== Переменные для аудиозаписи =====
+// ===== Переменные для записи аудио/видео =====
 let mediaRecorder = null;
-let audioChunks = [];
+let recordedChunks = [];
 let recordingInterval = null;
 let recordingSeconds = 0;
+let activeStream = null;        // текущий поток (для остановки треков)
+let recordingType = null;       // 'audio' или 'video'
 
 // ===== Общие вспомогательные функции =====
-
-// Закрытие модального окна
 function closeModal() {
   modal.classList.add('hidden');
   delete modal.dataset.pendingText;
@@ -38,7 +40,6 @@ function closeModal() {
   coordError.classList.add('hidden');
 }
 
-// Показать модалку для ручного ввода координат (текст)
 function showModalForManualInput(text) {
   modal.dataset.pendingText = text;
   modal.dataset.context = 'text';
@@ -48,7 +49,6 @@ function showModalForManualInput(text) {
   coordInput.focus();
 }
 
-// Показать модалку для ручного ввода координат (аудио)
 function showModalForManualInputAudio() {
   modal.dataset.context = 'audio';
   coordInput.value = '';
@@ -57,7 +57,15 @@ function showModalForManualInputAudio() {
   coordInput.focus();
 }
 
-// Добавление текстового поста в DOM и в массив
+function showModalForManualInputVideo() {
+  modal.dataset.context = 'video';
+  coordInput.value = '';
+  coordError.classList.add('hidden');
+  modal.classList.remove('hidden');
+  coordInput.focus();
+}
+
+// Добавление текстового поста
 function addTextPostToDOM(text, latitude, longitude) {
   const postId = Date.now() + Math.random();
   const post = {
@@ -72,13 +80,10 @@ function addTextPostToDOM(text, latitude, longitude) {
 
   const postElement = document.createElement('article');
   postElement.classList.add('post');
-  postElement.dataset.id = postId;
-
   const header = document.createElement('div');
   header.classList.add('post-header');
   const dateStr = post.timestamp.toLocaleString('ru-RU');
   header.innerHTML = `<span>${dateStr}</span><span class="post-coordinates">📍 ${latitude.toFixed(5)}, ${longitude.toFixed(5)}</span>`;
-
   const textDiv = document.createElement('div');
   textDiv.classList.add('post-text');
   textDiv.textContent = text;
@@ -88,7 +93,7 @@ function addTextPostToDOM(text, latitude, longitude) {
   timelineContainer.prepend(postElement);
 }
 
-// Добавление аудио-поста в DOM и в массив
+// Добавление аудио-поста
 function addAudioPostToDOM(audioBlob, latitude, longitude) {
   const audioUrl = URL.createObjectURL(audioBlob);
   const postId = Date.now() + Math.random();
@@ -108,7 +113,6 @@ function addAudioPostToDOM(audioBlob, latitude, longitude) {
   header.classList.add('post-header');
   const dateStr = post.timestamp.toLocaleString('ru-RU');
   header.innerHTML = `<span>${dateStr}</span><span class="post-coordinates">📍 ${latitude.toFixed(5)}, ${longitude.toFixed(5)}</span>`;
-
   const audioElem = document.createElement('audio');
   audioElem.controls = true;
   audioElem.src = audioUrl;
@@ -118,7 +122,37 @@ function addAudioPostToDOM(audioBlob, latitude, longitude) {
   timelineContainer.prepend(postElement);
 }
 
-// Создание текстового поста после получения координат (гео или ручной ввод)
+// Добавление видео-поста
+function addVideoPostToDOM(videoBlob, latitude, longitude) {
+  const videoUrl = URL.createObjectURL(videoBlob);
+  const postId = Date.now() + Math.random();
+  const post = {
+    id: postId,
+    type: 'video',
+    videoUrl,
+    latitude,
+    longitude,
+    timestamp: new Date(),
+  };
+  posts.unshift(post);
+
+  const postElement = document.createElement('article');
+  postElement.classList.add('post', 'post-video');
+  const header = document.createElement('div');
+  header.classList.add('post-header');
+  const dateStr = post.timestamp.toLocaleString('ru-RU');
+  header.innerHTML = `<span>${dateStr}</span><span class="post-coordinates">📍 ${latitude.toFixed(5)}, ${longitude.toFixed(5)}</span>`;
+  const videoElem = document.createElement('video');
+  videoElem.controls = true;
+  videoElem.src = videoUrl;
+  videoElem.style.maxWidth = '100%';
+
+  postElement.appendChild(header);
+  postElement.appendChild(videoElem);
+  timelineContainer.prepend(postElement);
+}
+
+// Создание текстового поста
 function createTextPost(text, latitude, longitude) {
   if (!text.trim()) {
     alert('Текст записи не может быть пустым');
@@ -128,10 +162,10 @@ function createTextPost(text, latitude, longitude) {
   return true;
 }
 
-// === Геолокация для текстового поста ===
+// === Геолокация для текста ===
 function requestGeolocationAndCreatePost(text) {
   if (!navigator.geolocation) {
-    alert('Geolocation не поддерживается вашим браузером. Введите координаты вручную.');
+    alert('Geolocation не поддерживается. Введите координаты вручную.');
     showModalForManualInput(text);
     return;
   }
@@ -142,32 +176,16 @@ function requestGeolocationAndCreatePost(text) {
       postInput.value = '';
     },
     (error) => {
-      console.warn('Ошибка геолокации:', error);
-      let errorMessage = 'Не удалось определить координаты. ';
-      switch (error.code) {
-        case error.PERMISSION_DENIED:
-          errorMessage += 'Пользователь запретил доступ к геолокации.';
-          break;
-        case error.POSITION_UNAVAILABLE:
-          errorMessage += 'Информация о местоположении недоступна.';
-          break;
-        case error.TIMEOUT:
-          errorMessage += 'Превышено время ожидания.';
-          break;
-        default:
-          errorMessage += 'Неизвестная ошибка.';
-      }
-      alert(errorMessage + ' Пожалуйста, введите координаты вручную.');
+      alert('Не удалось определить координаты. Введите их вручную.');
       showModalForManualInput(text);
     },
-    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    { enableHighAccuracy: true, timeout: 10000 }
   );
 }
 
-// === Геолокация для аудио-поста ===
+// === Геолокация для аудио ===
 function requestGeolocationAndCreateAudio() {
   if (!navigator.geolocation) {
-    alert('Geolocation не поддерживается. Введите координаты вручную.');
     showModalForManualInputAudio();
     return;
   }
@@ -178,20 +196,41 @@ function requestGeolocationAndCreateAudio() {
         addAudioPostToDOM(window.pendingAudioBlob, latitude, longitude);
         window.pendingAudioBlob = null;
       }
-      // Скрыть панель записи и вернуть кнопки
       recordingPanel.classList.add('hidden');
       document.querySelector('.action-buttons').classList.remove('hidden');
       stopRecordingTimer();
     },
-    (error) => {
-      console.warn('Ошибка геолокации:', error);
-      alert('Не удалось определить координаты. Введите их вручную.');
-      showModalForManualInputAudio();
-    }
+    () => showModalForManualInputAudio()
   );
 }
 
-// === Управление записью аудио ===
+// === Геолокация для видео ===
+function requestGeolocationAndCreateVideo() {
+  if (!navigator.geolocation) {
+    showModalForManualInputVideo();
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const { latitude, longitude } = position.coords;
+      if (window.pendingVideoBlob) {
+        addVideoPostToDOM(window.pendingVideoBlob, latitude, longitude);
+        window.pendingVideoBlob = null;
+      }
+      recordingPanel.classList.add('hidden');
+      videoPreviewContainer.classList.add('hidden');
+      if (videoPreview.srcObject) {
+        videoPreview.srcObject.getTracks().forEach(track => track.stop());
+        videoPreview.srcObject = null;
+      }
+      document.querySelector('.action-buttons').classList.remove('hidden');
+      stopRecordingTimer();
+    },
+    () => showModalForManualInputVideo()
+  );
+}
+
+// === Управление таймером записи ===
 function startRecordingTimer() {
   recordingSeconds = 0;
   recordingTimerSpan.textContent = '0';
@@ -211,54 +250,100 @@ function stopRecordingTimer() {
 
 function cancelRecording() {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.onstop = null; // предотвращаем создание поста
+    mediaRecorder.onstop = null;
     mediaRecorder.stop();
   }
+  if (activeStream) {
+    activeStream.getTracks().forEach(track => track.stop());
+    activeStream = null;
+  }
+  if (videoPreview.srcObject) {
+    videoPreview.srcObject.getTracks().forEach(track => track.stop());
+    videoPreview.srcObject = null;
+  }
   recordingPanel.classList.add('hidden');
+  videoPreviewContainer.classList.add('hidden');
   document.querySelector('.action-buttons').classList.remove('hidden');
   stopRecordingTimer();
+  recordedChunks = [];
 }
 
 function finishRecording() {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
   }
-  // Панель и таймер будут скрыты после создания поста в onstop
 }
 
+// === Аудио запись ===
 async function startAudioRecording() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    activeStream = stream;
     mediaRecorder = new MediaRecorder(stream);
-    audioChunks = [];
+    recordedChunks = [];
+    recordingType = 'audio';
 
     mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) audioChunks.push(event.data);
+      if (event.data.size > 0) recordedChunks.push(event.data);
     };
-
     mediaRecorder.onstop = () => {
-      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-      // Останавливаем все треки микрофона
-      stream.getTracks().forEach(track => track.stop());
-      // Сохраняем blob во временной переменной
+      const audioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+      if (activeStream) activeStream.getTracks().forEach(track => track.stop());
       window.pendingAudioBlob = audioBlob;
-      // Запрашиваем геолокацию (или ручной ввод)
       requestGeolocationAndCreateAudio();
+      recordedChunks = [];
     };
-
-    mediaRecorder.start(100); // собираем данные каждые 100 мс
+    mediaRecorder.start(100);
     startRecordingTimer();
 
-    // Скрываем кнопки микрофона/видео, показываем панель записи
     document.querySelector('.action-buttons').classList.add('hidden');
     recordingPanel.classList.remove('hidden');
   } catch (err) {
-    console.error('Ошибка доступа к микрофону:', err);
-    alert('Не удалось получить доступ к микрофону. Пожалуйста, разрешите использование и перезагрузите страницу.');
+    alert('Не удалось получить доступ к микрофону. Проверьте разрешения.');
   }
 }
 
-// === Обработчик отправки текста ===
+// === Видео запись ===
+async function startVideoRecording() {
+  try {
+    // Запрашиваем видео и аудио
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    activeStream = stream;
+    mediaRecorder = new MediaRecorder(stream);
+    recordedChunks = [];
+    recordingType = 'video';
+
+    // Показываем превью (без звука)
+    videoPreview.srcObject = stream;
+    videoPreview.muted = true;
+    videoPreviewContainer.classList.remove('hidden');
+
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) recordedChunks.push(event.data);
+    };
+    mediaRecorder.onstop = () => {
+      const videoBlob = new Blob(recordedChunks, { type: 'video/webm' });
+      if (activeStream) activeStream.getTracks().forEach(track => track.stop());
+      if (videoPreview.srcObject) {
+        videoPreview.srcObject.getTracks().forEach(track => track.stop());
+        videoPreview.srcObject = null;
+      }
+      window.pendingVideoBlob = videoBlob;
+      requestGeolocationAndCreateVideo();
+      recordedChunks = [];
+      videoPreviewContainer.classList.add('hidden');
+    };
+    mediaRecorder.start(100);
+    startRecordingTimer();
+
+    document.querySelector('.action-buttons').classList.add('hidden');
+    recordingPanel.classList.remove('hidden');
+  } catch (err) {
+    alert('Не удалось получить доступ к камере и микрофону. Проверьте разрешения и устройства.');
+  }
+}
+
+// === Обработчики текстового ввода ===
 function onPostSubmit() {
   const text = postInput.value;
   if (!text.trim()) {
@@ -268,11 +353,11 @@ function onPostSubmit() {
   requestGeolocationAndCreatePost(text);
 }
 
-// === Обработчик подтверждения координат из модального окна (общий для текста и аудио) ===
+// === Обработчик подтверждения координат из модалки (общий) ===
 function onManualSubmit() {
   const rawCoords = coordInput.value.trim();
   const pendingText = modal.dataset.pendingText;
-  const context = modal.dataset.context; // 'text' или 'audio'
+  const context = modal.dataset.context; // 'text', 'audio', 'video'
 
   try {
     const { latitude, longitude } = parseCoordinates(rawCoords);
@@ -280,6 +365,13 @@ function onManualSubmit() {
       addAudioPostToDOM(window.pendingAudioBlob, latitude, longitude);
       window.pendingAudioBlob = null;
       recordingPanel.classList.add('hidden');
+      document.querySelector('.action-buttons').classList.remove('hidden');
+      stopRecordingTimer();
+    } else if (context === 'video' && window.pendingVideoBlob) {
+      addVideoPostToDOM(window.pendingVideoBlob, latitude, longitude);
+      window.pendingVideoBlob = null;
+      recordingPanel.classList.add('hidden');
+      videoPreviewContainer.classList.add('hidden');
       document.querySelector('.action-buttons').classList.remove('hidden');
       stopRecordingTimer();
     } else if (context === 'text' && pendingText) {
@@ -297,7 +389,7 @@ function onManualSubmit() {
   }
 }
 
-// === Инициализация обработчиков событий ===
+// === Инициализация слушателей ===
 submitBtn.addEventListener('click', onPostSubmit);
 postInput.addEventListener('keypress', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -305,21 +397,19 @@ postInput.addEventListener('keypress', (e) => {
     onPostSubmit();
   }
 });
-
 audioBtn.addEventListener('click', startAudioRecording);
+videoBtn.addEventListener('click', startVideoRecording);
 recordingOk.addEventListener('click', finishRecording);
 recordingCancel.addEventListener('click', cancelRecording);
-
 modalClose.addEventListener('click', closeModal);
 modalSubmit.addEventListener('click', onManualSubmit);
-// Закрытие по клику вне области контента
 modal.addEventListener('click', (e) => {
   if (e.target === modal) closeModal();
 });
 
-// === Демо-пост (пример из задачи 1) ===
+// Демо-пост
 setTimeout(() => {
   if (timelineContainer.children.length === 0) {
-    addTextPostToDOM('Это пример текстовой записи. Отправьте своё сообщение или записывайте аудио!', 55.751244, 37.618423);
+    addTextPostToDOM('Добро пожаловать в Timeline! Отправляйте текст, аудио и видео с геопозицией.', 55.751244, 37.618423);
   }
 }, 100);
