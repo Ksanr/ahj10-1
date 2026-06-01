@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Timeline</title>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <h1>Моя лента событий</h1>
+    </header>
+    <main class="timeline">
+      <!-- Сюда будут добавляться посты -->
+    </main>
+    <div class="post-form">
+      <textarea id="postInput" placeholder="Введите текст записи..." rows="2"></textarea>
+      <button id="submitBtn" class="btn-submit">Отправить</button>
+      <div class="action-buttons">
+        <button id="audioBtn" class="action-btn" title="Записать аудио">🎤</button>
+        <button id="videoBtn" class="action-btn" title="Записать видео">📹</button>
+      </div>
+
+      <!-- Панель записи (изначально скрыта) -->
+      <div id="recordingPanel" class="recording-panel hidden">
+        <span id="recordingTimer">0</span> сек
+        <button id="recordingOk" class="recording-ok">✓</button>
+        <button id="recordingCancel" class="recording-cancel">✗</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно для ручного ввода координат -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-content">
+      <span class="modal-close">&times;</span>
+      <h3>Введите координаты вручную</h3>
+      <p>Форматы: <code>51.50851, -0.12572</code> или <code>[51.50851, -0.12572]</code></p>
+      <input type="text" id="coordInput" placeholder="Например: 51.50851, -0.12572">
+      <div id="coordError" class="error-message hidden"></div>
+      <button id="modalSubmit" class="btn-submit">Подтвердить</button>
+    </div>
+  </div>
+</body>
+</html>
